@@ -99,6 +99,14 @@ rag-mcp/
 | `browse_category(category)` | List documents in a category with status, author info |
 | `save_knowledge(title, content, author, categories?)` | Create new document, auto-guesses categories |
 | `update_knowledge(file_path, content, author?)` | Update existing document, resets status to draft |
+| `start_discussion(topic, source_file_path?, seed_content?)` | Start a structured discussion session for knowledge exploration |
+| `add_insight(discussion_id, insight, type, confidence?, reference?)` | Add a classified insight (fact/opinion/assumption/question/concept/risk) |
+| `review_discussion(discussion_id)` | Review discussion state: all insights grouped by type, summary, gaps |
+| `reclassify_insight(insight_id, new_type, new_confidence?)` | Reclassify an insight when understanding changes |
+| `resolve_insight(insight_id, resolution)` | Mark an insight as resolved with explanation |
+| `harvest_discussion(discussion_id, title?, categories?)` | Synthesize discussion into a knowledge document draft |
+| `list_discussions(status?)` | List discussions filtered by status (active/paused/harvested/archived) |
+| `suggest_discussions()` | Suggest topics needing discussion (stale docs, gaps, contradictions) |
 
 ## MCP Prompts
 
@@ -107,6 +115,7 @@ rag-mcp/
 | `ask(question)` | Search knowledge base and synthesize an answer |
 | `summarize(topic)` | Summarize everything known about a topic |
 | `add_frontmatter(file_description)` | Generate correct YAML frontmatter for a new file |
+| `discuss(topic)` | Start a structured discussion to build knowledge through conversation |
 
 ---
 

@@ -203,7 +203,7 @@ Forte's PARA method — Projects, Areas, Resources, Archives — maps to the eng
 
 - **Capture**: `save_knowledge` tool creates new documents
 - **Organize**: Categories and status workflow structure content
-- **Distill**: Search and retrieval surface the right information at the right time
+- **Distill**: Discussion harvesting refines raw thinking into verified knowledge; progressive summarization layers key insights
 - **Express**: MCP tools enable AI-assisted synthesis and articulation
 
 ### Information Architecture Principles
@@ -303,9 +303,7 @@ relationships:
     type: "supersedes"
 ```
 
-Define a vocabulary: `explains`, `extends`, `contradicts`, `cites`, `prerequisite`, `supersedes`, `related_to`. Store in a `document_relationships` table. Enable graph traversal: `get_knowledge_path(start, end)` finds the shortest path through relationships. Expose bidirectional navigation in the web UI.
-
-Eventually, build an interactive knowledge graph visualization (D3.js force-directed graph) where nodes are documents, edges are relationships, and users can explore the structure visually.
+Define a vocabulary: `explains`, `extends`, `contradicts`, `cites`, `prerequisite`, `supersedes`, `related_to`. Store in a `document_relationships` table. Enable graph traversal: `get_knowledge_path(start, end)` finds the shortest path through relationships. Expose bidirectional navigation in the web UI. The visual exploration of this graph is covered separately in feature #14.
 
 **Why it matters**: This is the feature that transforms a "search engine with documents" into a "knowledge management platform." Explicit relationships encode institutional understanding of how concepts connect — something no amount of embedding similarity can infer.
 
@@ -348,6 +346,42 @@ The current workflow supports a single `approved_by` and `in_review_by` field. F
 
 **Why it matters**: Knowledge management is inherently collaborative. Single-approver workflows create bottlenecks and single points of failure. Rich attribution builds accountability and enables expertise discovery ("who on the team knows about Kubernetes?").
 
+### 11. Discussion-Driven Knowledge Harvesting (Socratic Method)
+
+The biggest gap in the current pipeline is **how knowledge enters the system**. Today, someone must write a finished markdown document and save it. But knowledge rarely starts as a polished document — it starts as conversations, debates, half-formed ideas, and exploratory reasoning. The engine has no mechanism to capture the *process* of thinking, only its *output*.
+
+**Proposed**: Add a structured discussion workflow as first-class MCP tools. `start_discussion(topic)` begins a reasoning session. During conversation, the LLM captures insights via `add_insight()`, classified as facts, opinions, assumptions, open questions, key concepts, or risks — each with confidence levels and optional references to existing knowledge base documents. `review_discussion()` summarizes progress and identifies gaps. When the discussion reaches good coverage, `harvest_discussion()` synthesizes all classified insights into a knowledge document draft that enters the standard review pipeline.
+
+Discussion state lives in SQLite (new `discussions` and `discussion_insights` tables), making it persistent across sessions, queryable, and cross-referenceable with existing documents. A `suggest_discussions()` tool analyzes the knowledge base to recommend topics needing exploration — stale documents, knowledge gaps, unresolved open questions from past discussions, and contradictions between documents.
+
+The harvest step delegates to `save_knowledge`, inheriting auto-category detection, relationship discovery (Smart Capture, feature #8), and the `draft → in_review → approved` quality workflow. Every harvested document links back to its source discussion, preserving the audit trail of *how* knowledge was derived — not just *what* it says.
+
+**Why it matters**: This implements the Socratic Method at the platform level. Socrates argued that knowledge emerges through structured dialogue — questioning, challenging assumptions, and refining understanding. The current engine captures knowledge; this feature captures *knowledge creation*. It bridges the gap between exploratory thinking and curated knowledge, and creates a feedback loop where the engine can recommend what to think about based on what it knows is stale, missing, or contradicted.
+
+### 12. Authentication & Authorization
+
+The current engine has no concept of user identity. All edits are attributed to "Local" or whatever the caller provides. For a single-user setup, this is fine. But the moment a second person touches the knowledge base — or you want accountability for who approved what — you need authentication.
+
+**Proposed**: Add a configurable authentication layer with two modes: **local accounts** (username/password with sign-up) and **SSO** (OpenID Connect / OAuth2). When auth is disabled (default), everything works as today — no breaking change. When enabled, unauthenticated users get read-only access (browse, search, read), while authenticated users can edit, review, and approve. The authenticated username flows into all metadata operations — `author`, `approved_by`, `in_review_by` — creating a natural audit trail. A role hierarchy (`viewer`, `editor`, `reviewer`, `admin`) controls access to write operations, status changes, and admin features. The first user to sign up in local mode automatically gets the `admin` role.
+
+**Why it matters**: Identity is the prerequisite for accountability. Without it, revision tracking shows *what* changed but not *who* decided it. Multi-reviewer collaboration (#10) needs real identities. Discussion harvesting (#11) benefits from knowing who contributed which insights. And for any team deployment, the principle of least privilege demands that read access and write access have different gates.
+
+### 13. LLM Enrichment via MCP Sampling
+
+The Knowledge Engine's ingestion pipeline is deliberately LLM-free — parsing, hashing, embedding, and indexing are deterministic and fast. But several features produce better results with LLM intelligence: synthesizing discussion insights into prose (#11), generating summaries when authors don't provide them (#2), inferring relationship types between documents (#6), and improving category detection (#8). The question is: how do you add LLM intelligence without adding LLM infrastructure?
+
+**Proposed**: Use MCP's built-in **sampling** capability — the protocol allows the server to ask the *client's* LLM to generate text in a fresh, isolated context. The server sends a self-contained prompt via `ctx.session.create_message()`, receives the generated text, and uses it. No API keys, no model config, no server-side cost. Every sampling call has a graceful fallback — if the client doesn't support sampling, the engine falls back to non-LLM behavior (mechanical assembly, nearest-embedding matching, etc.). LLM enrichment is always **explicit** (via `enrich_document`, `enrich_category` tools) and **never automatic** during indexing — the core pipeline stays deterministic. Auto-generated content is flagged in metadata and human-written content always takes precedence.
+
+**Why it matters**: This resolves a fundamental tension: LLMs produce better knowledge artifacts, but embedding an LLM into the server creates infrastructure dependency, non-determinism, and cost. MCP sampling borrows the client's intelligence without owning it. The engine works fully without sampling support, but produces richer output when it's available. This pattern — **optional LLM enhancement with graceful degradation** — is the right architecture for tools that want AI quality without AI dependency.
+
+### 14. Knowledge Graph Visualization
+
+Text-based search answers questions you know to ask. But what about the questions you don't know to ask? Where are the clusters of related knowledge? Which documents are orphaned? What superseded chains exist? Which categories are sparse? These structural questions are invisible in list-based interfaces — but immediately obvious in a visual graph.
+
+**Proposed**: An interactive **knowledge graph page** in the web UI, powered by D3.js force-directed layout. Documents are nodes (colored by category, sized by popularity, faded by staleness). Relationships and wikilinks are edges (typed, directed, color-coded). The graph supports pan/zoom, filtering by category and relationship type, search highlighting, and a sidebar detail panel. Three layout modes — force-directed (clusters emerge naturally), category-grouped (nodes pulled toward domain centers), and radial (selected node at center with concentric rings). A statistics panel surfaces orphan counts, hub documents, largest clusters, and superseded chains.
+
+**Why it matters**: Spatial cognition reveals patterns that sequential browsing cannot. A knowledge graph lets you see the **shape** of your knowledge — where it's dense, where it's sparse, where connections are missing. Orphan documents become visible dots floating alone. Dense clusters reveal your areas of deep expertise. Superseded chains show up as gray trails. This turns the knowledge base from a searchable database into an explorable landscape, supporting the kind of serendipitous discovery that makes knowledge systems truly useful.
+
 ---
 
 ### Implementation Priority
@@ -358,16 +392,20 @@ The improvements above are ordered roughly by impact-to-effort ratio:
 |----------|---------|----------------|
 | **Critical** | Wikilinks & Backlinks | Knowledge graph, relationship types |
 | **Critical** | Progressive Summarization | Tier-based search, express workflow |
+| **Critical** | Discussion-Driven Harvesting | Knowledge creation loop, feedback cycle |
+| **High** | LLM Enrichment via MCP Sampling | Auto-summaries, synthesis, relationship inference |
+| **High** | Authentication & Authorization | User identity for all write ops, team deployment |
 | **High** | Staleness Metrics | Review scheduling, confidence filtering |
 | **High** | Review Tracking | Spaced repetition, usage analytics |
 | **High** | Explicit Relationships | Graph visualization, navigation |
+| **Medium** | Knowledge Graph Visualization | Spatial discovery, orphan detection |
 | **Medium** | Usage Analytics | Data-driven knowledge management |
 | **Medium** | Contextual Retrieval | Personalized search |
 | **Medium** | Smart Capture | Orphan prevention |
 | **Medium** | Import Pipeline | Knowledge coverage |
 | **Lower** | Multi-Reviewer Collaboration | Team scaling |
 
-The critical path starts with **Wikilinks** and **Progressive Summarization** — they are foundational features that enable most of the others. Staleness metrics and review tracking provide the empirical feedback loop that makes knowledge management sustainable rather than aspirational.
+The critical path now has three pillars: **Wikilinks** (how knowledge connects), **Progressive Summarization** (how knowledge is distilled), and **Discussion Harvesting** (how knowledge is created). Staleness metrics and review tracking provide the empirical feedback loop that makes knowledge management sustainable rather than aspirational.
 
 ---
 
@@ -377,6 +415,6 @@ The Knowledge Engine exists because the gap between "having information" and "be
 
 By combining hybrid search, quality-gated retrieval, revision accountability, and an AI-native interface, the engine transforms a collection of markdown files into a living, queryable, trustworthy knowledge system. It takes the best ideas from PKM theory, the Zettelkasten method, and modern RAG architecture and implements them in a portable, open-format system that serves both humans and machines.
 
-The roadmap ahead — wikilinks, progressive summarization, staleness metrics, knowledge graphs, and contextual retrieval — charts a path from "smart document search" to a true knowledge management platform where every piece of information is connected, quality-assessed, and discoverable at the right level of abstraction.
+The roadmap ahead — wikilinks, progressive summarization, staleness metrics, knowledge graphs, discussion-driven harvesting, and contextual retrieval — charts a path from "smart document search" to a true knowledge management platform where every piece of information is connected, quality-assessed, and discoverable at the right level of abstraction.
 
 The question isn't whether you need a knowledge system. It's whether the one you have was designed for how you actually work — with AI copilots, across teams, at scale, with accountability. If not, it's time for a knowledge engine.
